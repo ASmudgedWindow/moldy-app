@@ -1,0 +1,5 @@
+/*    /index.html   200
+# subdomain routing for Netlify:
+projects.moldy.app/*    /projects.html   200
+stuff.moldy.app/*       /stuff.html      200
+info.moldy.app/*        /info.html       200

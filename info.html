@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Moldy.App — Info</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <canvas id="starfield"></canvas>
+
+  <header class="hero small">
+    <h1 class="title">Info</h1>
+    <p class="subtitle">About Moldy.App — contacts, setup notes, and quickstarts.</p>
+    <nav class="links">
+      <a href="index.html" class="btn">Home</a>
+      <a href="projects.html" class="btn">Tech Fair Projects</a>
+      <a href="stuff.html" class="btn">Random Stuff</a>
+    </nav>
+  </header>
+
+  <main class="panel">
+    <section class="card" id="info-card">
+      <h2>About</h2>
+      <p id="mold-age">My name is mold, and I am <span id="age-counter">calculating…</span> old.</p>
+      <p style="font-size:0.85rem; color:var(--muted); margin-top:0.6rem;">
+        Counter reference time: 2013-07-17 21:15 (local timezone on your device).
+      </p>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <small>info.moldy.app — Info</small>
+  </footer>
+
+  <script src="starfield.js"></script>
+  <script>
+    // Live age counter since 2013-07-17 21:15 (uses local timezone)
+    (function(){
+      const start = new Date(2013, 6, 17, 21, 15, 0); // months are 0-indexed: 6 = July
+      const el = document.getElementById('age-counter');
+
+      function daysInMonth(year, monthIndex){
+        return new Date(year, monthIndex + 1, 0).getDate();
+      }
+
+      function computeDiff(from, to){
+        // Copy components
+        let y = to.getFullYear() - from.getFullYear();
+        let m = to.getMonth() - from.getMonth();
+        let d = to.getDate() - from.getDate();
+        let hh = to.getHours() - from.getHours();
+        let mm = to.getMinutes() - from.getMinutes();
+        let ss = to.getSeconds() - from.getSeconds();
+
+        if (ss < 0){ ss += 60; mm -= 1; }
+        if (mm < 0){ mm += 60; hh -= 1; }
+        if (hh < 0){ hh += 24; d -= 1; }
+        if (d < 0){
+          // borrow days from previous month of 'to'
+          const prevMonth = (to.getMonth() - 1 + 12) % 12;
+          const prevYear = prevMonth === 11 ? to.getFullYear() - 1 : to.getFullYear();
+          d += daysInMonth(prevYear, prevMonth);
+          m -= 1;
+        }
+        if (m < 0){ m += 12; y -= 1; }
+
+        return { years: y, months: m, days: d, hours: hh, minutes: mm, seconds: ss };
+      }
+
+      function plural(n, label){
+        return n + ' ' + label + (n === 1 ? '' : 's');
+      }
+
+      function render(){
+        const now = new Date();
+        const diff = computeDiff(start, now);
+        const parts = [
+          plural(diff.years, 'year'),
+          plural(diff.months, 'month'),
+          plural(diff.days, 'day'),
+          plural(diff.hours, 'hour'),
+          plural(diff.minutes, 'minute'),
+          plural(diff.seconds, 'second')
+        ];
+        el.textContent = parts.join(', ');
+      }
+
+      // update immediately and then every 1s
+      render();
+      setInterval(render, 1000);
+      window.__moldy_age = { start };
+    })();
+  </script>
+</body>
+</html>
