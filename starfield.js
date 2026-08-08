@@ -1,4 +1,4 @@
-// high-quality starfield with layered stars, soft glow, and comet effects
+// starfield.js - dense layered starfield with twinkle and pointer-based parallax (no comets)
 (() => {
   const canvas = document.querySelector('#starfield');
   if (!canvas) return;
@@ -11,201 +11,163 @@
     canvas.width = Math.floor(w * dpr);
     canvas.height = Math.floor(h * dpr);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    // rebuild stars to match new size for balanced density
+    buildStars();
   }
   window.addEventListener('resize', resize, { passive: true });
-  resize();
 
-  // star layers: furthest to nearest
-  const LAYERS = [
-    {count: Math.floor((w*h)/90000), speed: 0.05, size: 0.6, alpha: 0.45},
-    {count: Math.floor((w*h)/48000), speed: 0.12, size: 1.0, alpha: 0.6},
-    {count: Math.floor((w*h)/22000), speed: 0.3, size: 1.8, alpha: 0.9}
+  // configuration
+  const BASE_DENSITY = 0.00075; // stars per px^2 (increase for denser field)
+  const LAYER_CONFIG = [
+    { depth: 0.35, size: 0.6, twinkle: 0.8 }, // far
+    { depth: 0.65, size: 1.1, twinkle: 1.0 }, // mid
+    { depth: 1.0,  size: 2.2, twinkle: 1.6 }  // near
   ];
 
   let stars = [];
-  const comets = [];
-  const pointer = { x: w/2, y: h/2 };
+  const pointer = { x: 0.5, y: 0.5 }; // normalized (0..1)
+  let lastPointer = { x: 0.5, y: 0.5 };
 
-  function rand(min, max){ return Math.random()*(max-min)+min; }
+  function normPointer(px, py){
+    const rect = canvas.getBoundingClientRect();
+    const nx = Math.max(0, Math.min(1, (px - rect.left) / rect.width));
+    const ny = Math.max(0, Math.min(1, (py - rect.top) / rect.height));
+    return { x: nx, y: ny };
+  }
+
+  // lower density on small screens/devices automatically
+  function computeCounts(){
+    const area = w * h;
+    const base = Math.max(80, Math.floor(area * BASE_DENSITY));
+    // split across layers proportionally
+    const counts = LAYER_CONFIG.map((l, i) => {
+      const weight = (i+1) / LAYER_CONFIG.length;
+      return Math.floor(base * weight);
+    });
+    return counts;
+  }
 
   class Star {
-    constructor(layer){
-      this.layer = layer;
+    constructor(layerIndex){
+      this.layer = layerIndex;
       this.reset(true);
     }
     reset(init){
-      this.x = Math.random()*w;
-      this.y = Math.random()*h;
-      this.r = (LAYERS[this.layer].size) * (0.6 + Math.random()*0.9);
-      this.alpha = LAYERS[this.layer].alpha * (0.6 + Math.random()*0.8);
-      this.twinkleSpeed = 0.003 + Math.random()*0.02;
-      this.phase = Math.random()*Math.PI*2;
-      this.vx = (Math.random()-0.5)*0.05*LAYERS[this.layer].speed;
-      this.vy = (Math.random()-0.5)*0.05*LAYERS[this.layer].speed;
-      if (init) { this.vx*=0.2; this.vy*=0.2; }
+      this.x = Math.random() * w;
+      this.y = Math.random() * h;
+      const cfg = LAYER_CONFIG[this.layer];
+      // size varies a bit
+      this.baseR = cfg.size * (0.7 + Math.random()*0.9);
+      this.r = this.baseR;
+      // base alpha depends on depth (near = brighter)
+      this.baseAlpha = 0.25 + (cfg.depth * (0.55 + Math.random()*0.35));
+      // twinkle speed and amplitude
+      this.twinkleSpeed = (0.002 + Math.random()*0.012) * cfg.twinkle;
+      this.twinklePhase = Math.random() * Math.PI * 2;
+      // subtle drift velocity per layer
+      this.vx = (Math.random() - 0.5) * 0.02 * cfg.depth;
+      this.vy = (Math.random() - 0.5) * 0.02 * cfg.depth;
+      if (init && Math.random() < 0.85) { this.vx *= 0.1; this.vy *= 0.1; }
     }
     update(dt){
-      this.phase += this.twinkleSpeed * dt;
+      this.twinklePhase += this.twinkleSpeed * dt;
+      // gentle drift
       this.x += this.vx * dt;
       this.y += this.vy * dt;
+      // wrap around
       if (this.x < -40) this.x = w + 40;
       if (this.x > w + 40) this.x = -40;
       if (this.y < -40) this.y = h + 40;
       if (this.y > h + 40) this.y = -40;
     }
     draw(ctx, px, py){
-      const par = 1 + (this.layer*0.06);
-      const dx = (this.x - px) * 0.015 * par;
-      const dy = (this.y - py) * 0.015 * par;
-      const sx = this.x - dx;
-      const sy = this.y - dy;
-      const r = Math.max(0.2, this.r + Math.sin(this.phase)*0.35);
+      // pointer parallax: near layers move more in opposite direction
+      const cfg = LAYER_CONFIG[this.layer];
+      const parallaxStrength = 18 * (cfg.depth); // pixels
+      const ox = (px - 0.5) * parallaxStrength;
+      const oy = (py - 0.5) * parallaxStrength;
+      const sx = this.x - ox;
+      const sy = this.y - oy;
 
-      // soft glow
-      const g = ctx.createRadialGradient(sx, sy, 0, sx, sy, r*6);
-      g.addColorStop(0, `rgba(255,255,255,${Math.min(1,this.alpha)})`);
-      g.addColorStop(0.25, `rgba(150,200,255,${this.alpha*0.45})`);
+      const tw = Math.sin(this.twinklePhase) * 0.45 + 0.55; // 0.1..1 roughly
+      const r = Math.max(0.2, this.baseR * tw);
+      const alpha = Math.max(0.06, Math.min(1, this.baseAlpha * (0.6 + (tw*0.6))));
+
+      // soft glow radial gradient
+      const g = ctx.createRadialGradient(sx, sy, 0, sx, sy, r * 5.5);
+      g.addColorStop(0, `rgba(255,255,255,${alpha})`);
+      g.addColorStop(0.22, `rgba(170,200,255,${alpha * 0.55})`);
       g.addColorStop(1, 'rgba(0,0,0,0)');
       ctx.globalCompositeOperation = 'screen';
       ctx.fillStyle = g;
       ctx.beginPath();
-      ctx.ellipse(sx, sy, r*6, r*6, 0, 0, Math.PI*2);
+      ctx.ellipse(sx, sy, r * 5.5, r * 5.5, 0, 0, Math.PI * 2);
       ctx.fill();
 
-      // core
+      // bright core
       ctx.globalCompositeOperation = 'lighter';
-      ctx.fillStyle = `rgba(255,255,255,${0.9*this.alpha})`;
+      ctx.fillStyle = `rgba(255,255,255,${Math.min(1, alpha * 0.95)})`;
       ctx.beginPath();
-      ctx.arc(sx, sy, r*0.9, 0, Math.PI*2);
+      ctx.arc(sx, sy, Math.max(0.25, r * 0.6), 0, Math.PI * 2);
       ctx.fill();
       ctx.globalCompositeOperation = 'source-over';
     }
   }
 
-  class Comet {
-    constructor(){
-      this.reset();
-    }
-    reset(){
-      const edge = Math.random() < 0.5 ? 'top' : 'left';
-      if (edge === 'top'){
-        this.x = Math.random()*w;
-        this.y = -20;
-        this.vx = rand(-0.6, 0.6);
-        this.vy = rand(1.2, 2.6);
-      } else {
-        this.x = -20;
-        this.y = Math.random()*h;
-        this.vx = rand(1.2, 2.6);
-        this.vy = rand(-0.4, 0.4);
-      }
-      this.speed = Math.hypot(this.vx, this.vy);
-      this.length = rand(140, 420);
-      this.trail = [];
-      this.life = 0;
-      this.maxLife = rand(240, 420);
-      this.size = rand(1.6, 2.8);
-      this.color = `rgba(200,230,255,`;
-    }
-    update(dt){
-      this.life += dt;
-      this.x += this.vx * dt;
-      this.y += this.vy * dt;
-      // record trail
-      this.trail.unshift({x:this.x, y:this.y});
-      if (this.trail.length > 60) this.trail.pop();
-      // kill if off-screen or over life
-      if (this.x < -this.length || this.x > w+this.length || this.y < -this.length || this.y > h+this.length || this.life > this.maxLife){
-        this.reset();
-      }
-    }
-    draw(ctx){
-      // draw long soft trail
-      ctx.save();
-      ctx.globalCompositeOperation = 'screen';
-      for (let i=0; i<this.trail.length; i+=2){
-        const p = this.trail[i];
-        if (!p) continue;
-        const t = i/this.trail.length;
-        const radius = (1-t)*this.size*5;
-        const alpha = (1-t)*0.4;
-        const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, radius*3);
-        g.addColorStop(0, `rgba(220,240,255,${alpha})`);
-        g.addColorStop(0.2, `rgba(180,210,255,${alpha*0.6})`);
-        g.addColorStop(1, 'rgba(0,0,0,0)');
-        ctx.fillStyle = g;
-        ctx.beginPath();
-        ctx.ellipse(p.x, p.y, radius*3, radius*1.1, Math.PI/6, 0, Math.PI*2);
-        ctx.fill();
-      }
-
-      // bright head
-      ctx.globalCompositeOperation = 'lighter';
-      ctx.fillStyle = `rgba(255,255,255,0.95)`;
-      ctx.beginPath();
-      ctx.arc(this.x, this.y, this.size*2.2, 0, Math.PI*2);
-      ctx.fill();
-      ctx.restore();
+  function buildStars(){
+    stars.length = 0;
+    if (w === 0 || h === 0) return;
+    const counts = computeCounts();
+    for (let li = 0; li < LAYER_CONFIG.length; li++){
+      const count = counts[li];
+      for (let i=0;i<count;i++) stars.push(new Star(li));
     }
   }
 
-  function init(){
-    stars = [];
-    for (let li=0; li<LAYERS.length; li++){
-      const layer = LAYERS[li];
-      for (let i=0;i<layer.count;i++) stars.push(new Star(li));
-    }
-    comets.length = 0;
-    // start with 1 comet occasionally
-    if (Math.random() < 0.5) comets.push(new Comet());
-  }
+  // interaction smoothing for pointer
+  let targetPointer = { x: 0.5, y: 0.5 };
+  canvas.addEventListener('pointermove', (e)=>{
+    const p = normPointer(e.clientX, e.clientY);
+    targetPointer.x = p.x;
+    targetPointer.y = p.y;
+  }, { passive: true });
+
+  // support touch center if no pointer movement
+  canvas.addEventListener('pointerleave', ()=>{ targetPointer.x = 0.5; targetPointer.y = 0.5; }, { passive: true });
 
   let last = performance.now();
   function frame(t){
-    const dt = Math.min(60, t - last) / 16.666;
+    const dtRaw = t - last;
+    const dt = Math.min(60, dtRaw) / 16.666; // normalized delta
     last = t;
 
-    // draw subtle backdrop each frame (keeps crisp color)
+    // smooth pointer interpolation
+    lastPointer.x += (targetPointer.x - lastPointer.x) * Math.min(0.2, 0.08 * dt);
+    lastPointer.y += (targetPointer.y - lastPointer.y) * Math.min(0.2, 0.08 * dt);
+
+    // draw background
     ctx.clearRect(0,0,w,h);
     const bg = ctx.createLinearGradient(0,0,0,h);
-    bg.addColorStop(0,'#041428');
-    bg.addColorStop(1,'#071331');
+    bg.addColorStop(0, '#041428');
+    bg.addColorStop(1, '#071331');
     ctx.fillStyle = bg;
     ctx.fillRect(0,0,w,h);
 
-    // occasional comet spawn
-    if (Math.random() < 0.006) comets.push(new Comet());
-
-    // update and draw stars
+    // update & draw stars
     for (let s of stars){
       s.update(dt);
-      s.draw(ctx, pointer.x, pointer.y);
+      s.draw(ctx, lastPointer.x, lastPointer.y);
     }
-
-    // update and draw comets
-    for (let c of comets){
-      c.update(dt);
-      c.draw(ctx);
-    }
-
-    // limit comets
-    if (comets.length > 6) comets.splice(0, comets.length-6);
 
     requestAnimationFrame(frame);
   }
 
-  canvas.addEventListener('pointermove', (e)=>{
-    const rect = canvas.getBoundingClientRect();
-    pointer.x = (e.clientX - rect.left);
-    pointer.y = (e.clientY - rect.top);
-  }, {passive:true});
-
-  // init and start
+  // initialize
   resize();
-  init();
+  buildStars();
   last = performance.now();
   requestAnimationFrame(frame);
 
-  // expose toggle for dev/test
-  window._moldy_resetStars = () => init();
+  // developer helper
+  window._moldy_resetStars = () => { buildStars(); };
 })();
