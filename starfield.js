@@ -26,9 +26,9 @@
 
   // Layers from far -> near
   const LAYER_CONFIG = [
-    { depth: 0.35, size: 0.45, twinkle: 0.9 }, // far (many small faint stars)
-    { depth: 0.65, size: 1.0,  twinkle: 1.1 }, // mid
-    { depth: 1.0,  size: 2.1,  twinkle: 1.8 }  // near (fewer, brighter)
+    { depth: 0.35, size: 0.9,  twinkle: 0.9 }, // far (many small faint stars)
+    { depth: 0.65, size: 2.1,  twinkle: 1.1 }, // mid
+    { depth: 1.0,  size: 3.2,  twinkle: 1.8 }  // near (fewer, brighter)
   ];
 
   let stars = [];
